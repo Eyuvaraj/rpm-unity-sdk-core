@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using UnityEngine;
+using Newtonsoft.Json.Linq;
 
 namespace ReadyPlayerMe.Core
 {
@@ -73,6 +74,7 @@ namespace ReadyPlayerMe.Core
         /// <returns>The avatar metadata as a <see cref="AvatarMetadata" /> structure.</returns>
         public async Task<AvatarMetadata> Download(string url, CancellationToken token = new CancellationToken())
         {
+            url += "?preview=true";
             SDKLogger.Log(TAG, DOWNLOADING_METADATA_INTO_MEMORY);
             var dispatcher = new WebRequestDispatcher();
             dispatcher.ProgressChanged += ProgressChanged;
@@ -150,15 +152,30 @@ namespace ReadyPlayerMe.Core
         /// <returns>The avatar metadata as an <see cref="AvatarMetadata" /> structure.</returns>
         private AvatarMetadata ParseResponse(string response)
         {
+            var jsonObject = JObject.Parse(response);
+
+            if (jsonObject["data"] != null)
+            {
+                var data = jsonObject["data"];
+                var transformed = new JObject
+                {
+                    ["id"] = data["id"],
+                    ["bodyType"] = data["bodyType"],
+                    ["outfitGender"] = data["gender"]?.ToString().ToLower() == "male" ? "masculine" : "feminine",
+                    ["skinTone"] = data["assets"]?["skinColorHex"] ?? "#ffffff",
+                    ["createdAt"] = DateTime.UtcNow.ToString("o"),
+                    ["updatedAt"] = DateTime.UtcNow.ToString("o")
+                };
+
+                response = transformed.ToString(Formatting.None);
+            }
+
             var metadata = JsonConvert.DeserializeObject<AvatarMetadata>(response, new JsonSerializerSettings
             {
                 DateFormatString = METADATA_TIME_FORMAT
             });
 
-            if (metadata.BodyType == BodyType.None)
-            {
-                throw new CustomException(FailureType.MetadataParseError, FAILED_TO_PARSE_METADATA_UNEXPECTED_BODY_TYPE);
-            }
+            metadata.BodyType = BodyType.FullBody;
 
             SDKLogger.Log(TAG, $"{metadata.BodyType} metadata loading completed.");
             return metadata;
